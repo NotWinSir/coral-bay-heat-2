@@ -1,79 +1,159 @@
-// The screenshot scenes behind ?shot=start|play|end. Each one plays the real rules forward from a
-// fresh world for a fixed number of steps, steered by a simple autopilot (look ahead each way the
-// paddle could move, keep clear of blocks, chase the lowest coin when that is safe), so the frame
-// is what a short game really looks like and the same seed always gives the same frame.
-import { FIELD, PLAYER, STEP } from './config.js';
-import { EVENT_OVER, KIND_BLOCK } from './world.js';
-import { SCREEN_OVER, SCREEN_PLAY, SCREEN_TITLE } from './render.js';
+// shots.js — the four screenshot scenes, staged deterministically from the
+// ?shot= parameter: the same seed builds the same city, then each scene
+// places Marco, his car, the law and the Vultures where the story needs
+// them, plays the real rules forward a few steps and freezes on the frame.
+// Nothing here is drawn by hand; every shot is the game itself, rendered.
 
-const START_SECONDS = 5;
-const PLAY_SECONDS = 26;
-const END_LIMIT_SECONDS = 600;
-/**
- * How far ahead, in seconds, the autopilot checks each way it could move: the play scene's pilot
- * looks well ahead and keeps all its lives; the end scene's looks only a moment ahead, so it is
- * caught out once the blocks speed up, as a hurried player is.
- */
-const HORIZON_PLAY = 0.7;
-const HORIZON_END = 0.25;
-const SAMPLE = 1 / 30;
-const DIRECTIONS = [0, -1, 1];
-/** Extra room, each side, it keeps between the paddle and a block. */
-const MARGIN = 10;
+import { poiById } from './city.js';
+import { blockOrigin } from './roads.js';
+import { makeCar } from './vehicles.js';
+import { spawnThug } from './combat.js';
+import { makePed } from './pedestrians.js';
+import { addHeat } from './police.js';
+import { MISSION_DEFS } from './missions.js';
+import { vRoadX, hRoadY } from './roads.js';
 
-/** Seconds until moving in `direction` (-1, 0, 1) runs the paddle into a block; Infinity when it never does. */
-function timeToHit(state, direction, horizon) {
-  const player = state.player;
-  for (let t = SAMPLE; t <= horizon; t += SAMPLE) {
-    const x = Math.min(FIELD.width - player.width, Math.max(0, player.x + direction * PLAYER.speed * t));
-    for (let index = 0; index < state.items.length; index += 1) {
-      const item = state.items[index];
-      if (!item.active || item.kind !== KIND_BLOCK) continue;
-      const y = item.y + item.speed * t;
-      if (y + item.height > player.y && y < player.y + player.height && item.x < x + player.width + MARGIN && item.x + item.width > x - MARGIN) return t;
-    }
-  }
-  return Infinity;
+function placeCamera(G, x, y) {
+  G.camera.x = Math.min(Math.max(0, x - 640), 3648 - 1280);
+  G.camera.y = Math.min(Math.max(0, y - 360), 2752 - 720);
 }
 
-/** Of the safe ways to move, the one toward the lowest coin (or the centre); else the one that is hit last. */
-function autopilot(state, horizon) {
-  const player = state.player;
-  let coin = null;
-  for (let index = 0; index < state.items.length; index += 1) {
-    const item = state.items[index];
-    if (item.active && item.kind !== KIND_BLOCK && (coin === null || item.y > coin.y)) coin = item;
+function fakeActive(G, defIndex, objective) {
+  G.missions.active = { def: MISSION_DEFS[defIndex], stage: 0, data: {} };
+  G.missions.objective = objective;
+}
+
+/** Cover: Marco at speed downtown in a scarlet Vireo, first job on the HUD. */
+function stageCover(G) {
+  const cafe = poiById(G.city, 'cafe');
+  const roadY = hRoadY(4);
+  const car = makeCar('sport', vRoadX(4) + 60, roadY + 15, 0, '#d92338');
+  car.driver = 'player';
+  car.speed = 235;
+  G.cars.push(car);
+  G.player.car = car;
+  G.player.x = car.x;
+  G.player.y = car.y;
+  const spot = blockOrigin(2, 2);
+  fakeActive(G, 0, { x: spot.x + 80, y: spot.y + 178, text: 'Collect the debt from Nico in Old Town', radius: 34 });
+  G.player.cash = 240;
+  G.player.respect = 12;
+  placeCamera(G, car.x + 120, car.y);
+}
+
+/** Chase: four stars, three Interceptors, one order — lose the heat. */
+function stageChase(G) {
+  const roadY = hRoadY(7);
+  const car = makeCar('sedan', vRoadX(9) + 40, roadY + 15, 0, '#3d7bd9');
+  car.driver = 'player';
+  car.speed = 285;
+  G.cars.push(car);
+  G.player.car = car;
+  G.player.x = car.x;
+  G.player.y = car.y;
+  for (let i = 0; i < 3; i += 1) {
+    const cop = makeCar('interceptor', car.x - 120 - i * 105, roadY + (i % 2 === 0 ? 15 : -15), 0, '#eef1f4');
+    cop.driver = 'police';
+    cop.speed = 268 - i * 14;
+    G.cars.push(cop);
+    G.cops.push(cop);
   }
-  const target = coin === null ? FIELD.width / 2 : coin.x + coin.width / 2;
-  const centre = player.x + player.width / 2;
-  const wanted = target > centre + 8 ? 1 : target < centre - 8 ? -1 : 0;
-  let best = wanted;
-  let bestTime = timeToHit(state, wanted, horizon);
-  for (let index = 0; index < DIRECTIONS.length && bestTime !== Infinity; index += 1) {
-    const time = timeToHit(state, DIRECTIONS[index], horizon);
-    if (time > bestTime) {
-      bestTime = time;
-      best = DIRECTIONS[index];
-    }
+  addHeat(G, 3.4);
+  const motel = poiById(G.city, 'motel');
+  fakeActive(G, 3, { x: motel.markerX, y: motel.markerY, text: 'Lose the heat — reach Motel Brisa', radius: 34 });
+  G.player.cash = 890;
+  G.player.respect = 84;
+  placeCamera(G, car.x + 60, car.y);
+}
+
+/** On foot: Marco on a busy Palm Row pavement, Vera waiting with work. */
+function stageFoot(G) {
+  const cafe = poiById(G.city, 'cafe');
+  G.player.x = cafe.markerX - 2;
+  G.player.y = cafe.markerY + 10;
+  G.player.angle = 0.4;
+  for (let i = 0; i < 6; i += 1) {
+    const ped = makePed(G.rng, cafe.markerX - 90 + i * 34, cafe.markerY - 26 + (i % 3) * 22);
+    ped.state = 'stand';
+    G.peds.push(ped);
   }
-  return best;
+  G.player.cash = 60;
+  placeCamera(G, G.player.x, G.player.y);
+}
+
+/** Mission: the Marina Cash Office, mid-gunfight, bag still on the desk. */
+function stageMission(G) {
+  const marina = poiById(G.city, 'marina');
+  G.player.x = marina.markerX - 44;
+  G.player.y = marina.markerY + 34;
+  const t1 = spawnThug(G, marina.markerX + 38, marina.markerY + 2, { group: 'm4' });
+  const t2 = spawnThug(G, marina.markerX + 76, marina.markerY + 46, { group: 'm4' });
+  const t3 = spawnThug(G, marina.markerX + 8, marina.markerY + 74, { group: 'm4' });
+  t1.state = 'combat';
+  t2.state = 'combat';
+  t3.state = 'combat';
+  t2.hp = 22;
+  t2.hurtT = 0.2;
+  G.aggroGroups.add('m4');
+  G.player.angle = Math.atan2(t1.y - G.player.y, t1.x - G.player.x);
+  G.bullets.push({
+    x: G.player.x + Math.cos(G.player.angle) * 120,
+    y: G.player.y + Math.sin(G.player.angle) * 120,
+    vx: Math.cos(G.player.angle) * 860,
+    vy: Math.sin(G.player.angle) * 860,
+    life: 0.4, from: 'player', dmg: 16,
+  });
+  G.fx.muzzle(G.player.x + Math.cos(G.player.angle) * 13, G.player.y + Math.sin(G.player.angle) * 13, G.player.angle);
+  addHeat(G, 1.6);
+  fakeActive(G, 3, { x: marina.markerX, y: marina.markerY, text: 'Clear out the Marina Cash Office guards', radius: 46 });
+  G.player.cash = 1240;
+  G.player.respect = 118;
+  G.player.mag = 9;
+  placeCamera(G, G.player.x + 40, G.player.y);
+}
+
+export const SHOT_SCENES = {
+  cover: stageCover,
+  chase: stageChase,
+  foot: stageFoot,
+  mission: stageMission,
+};
+
+export function stageShot(G, name) {
+  const scene = SHOT_SCENES[name] || stageCover;
+  scene(G);
 }
 
 /**
- * Set `world` to the named scene (start, play or end; any other name is start) and return the
- * screen to draw over it and the best score to show.
+ * Transient dressing applied after the warmup steps, in the frozen frame:
+ * the mission scene gets its muzzle flashes and tracer rounds back, the
+ * instants a live fight shows for a twentieth of a second.
  */
-export function stageShot(name, world) {
-  world.reset();
-  if (name !== 'play' && name !== 'end') {
-    for (let index = 0; index < START_SECONDS / STEP; index += 1) world.step(STEP, 0, true);
-    return { screen: SCREEN_TITLE, best: 0 };
+export function dressShot(G, name) {
+  if (name !== 'mission') return;
+  const p = G.player;
+  const gx = p.x + Math.cos(p.angle) * 13;
+  const gy = p.y + Math.sin(p.angle) * 13;
+  G.fx.muzzle(gx, gy, p.angle);
+  G.bullets.push({
+    x: p.x + Math.cos(p.angle) * 64, y: p.y + Math.sin(p.angle) * 64,
+    vx: Math.cos(p.angle) * 860, vy: Math.sin(p.angle) * 860,
+    life: 0.4, from: 'player', dmg: 16,
+  });
+  let nearest = null;
+  let best = Infinity;
+  for (const thug of G.thugs) {
+    if (thug.dead) continue;
+    const d = Math.hypot(thug.x - p.x, thug.y - p.y);
+    if (d < best) { best = d; nearest = thug; }
   }
-  const limit = name === 'end' ? END_LIMIT_SECONDS : PLAY_SECONDS;
-  const horizon = name === 'end' ? HORIZON_END : HORIZON_PLAY;
-  for (let index = 0; index < limit / STEP; index += 1) {
-    if (world.step(STEP, autopilot(world.state, horizon), false) & EVENT_OVER) break;
+  if (nearest) {
+    const a = Math.atan2(p.y - nearest.y, p.x - nearest.x);
+    G.fx.muzzle(nearest.x + Math.cos(a) * 12, nearest.y + Math.sin(a) * 12, a);
+    G.bullets.push({
+      x: nearest.x + Math.cos(a) * 44, y: nearest.y + Math.sin(a) * 44,
+      vx: Math.cos(a) * 860, vy: Math.sin(a) * 860,
+      life: 0.4, from: 'thug', dmg: 6,
+    });
   }
-  const over = world.state.lives === 0;
-  return { screen: over ? SCREEN_OVER : SCREEN_PLAY, best: world.state.score };
 }

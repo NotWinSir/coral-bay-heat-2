@@ -12,6 +12,11 @@
 // Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
 
+// Coral Bay Heat — the game this entry hands in: an original open-world crime
+// game about Marco Reyes, Vera Castellan and the CBPD, built in game/ beside
+// this file (vanilla ES modules, no library, no network), with its four
+// screenshots in screenshots/. The plumbing below is the kit's; this note and
+// the hand-in log line are mine.
 import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,6 +34,7 @@ if (existsSync(join(here, 'screenshots'))) cpSync(join(here, 'screenshots'), joi
 // scorer would refuse (more than 4 screenshots or one over 256 KiB; more than 993 files in game/ or 48 MiB of game
 // files, in all, or a path under game/ over 1000 bytes: game/ counts beside /output's own 1000-entry cap, its
 // screenshots/ and dossier.json).
+console.log('Coral Bay Heat: handing in the streets of Coral Bay to ' + out);
 writeFileSync(
   join(out, 'dossier.json'),
   buildDossier(out, {

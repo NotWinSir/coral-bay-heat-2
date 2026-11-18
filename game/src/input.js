@@ -1,53 +1,83 @@
-// Keyboard and pointer input. Held keys give a steering direction; one-shot presses (start or
-// restart, pause) are queued as bit flags and taken once by the loop, so a press between two
-// frames is never lost and never counted twice.
+// input.js — keyboard and mouse for a wheelman: WASD/arrows to move and drive,
+// E to talk, steal and collect, F or Enter to get in and out of cars, mouse to
+// aim, click to shoot, R to reload, P or Esc for pause. Keys are tracked as
+// held state plus an edge-triggered "pressed" set cleared every step.
 
-export const ACTION_CONFIRM = 1;
-export const ACTION_PAUSE = 2;
+export const input = {
+  keys: new Set(),
+  pressed: new Set(),
+  mouseX: 0,
+  mouseY: 0,
+  mouseDown: false,
+  mouseClicked: false,
+  wheel: 0,
+};
 
-const LEFT = new Set(['ArrowLeft', 'KeyA']);
-const RIGHT = new Set(['ArrowRight', 'KeyD']);
-const CONFIRM = new Set(['Space', 'Enter']);
-const PAUSE = new Set(['KeyP', 'Escape']);
+const GAME_KEYS = new Set([
+  'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyE', 'KeyF', 'KeyR', 'KeyP',
+  'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'Enter', 'Escape',
+]);
 
-export function createInput(target) {
-  let left = false;
-  let right = false;
-  let actions = 0;
-
-  window.addEventListener('keydown', (event) => {
-    if (LEFT.has(event.code)) left = true;
-    else if (RIGHT.has(event.code)) right = true;
-    else if (CONFIRM.has(event.code)) {
-      if (!event.repeat) actions |= ACTION_CONFIRM;
-    } else if (PAUSE.has(event.code)) {
-      if (!event.repeat) actions |= ACTION_PAUSE;
-    } else return;
-    event.preventDefault();
+export function initInput(canvas) {
+  window.addEventListener('keydown', (ev) => {
+    if (GAME_KEYS.has(ev.code)) ev.preventDefault();
+    if (!ev.repeat) input.pressed.add(ev.code);
+    input.keys.add(ev.code);
   });
-  window.addEventListener('keyup', (event) => {
-    if (LEFT.has(event.code)) left = false;
-    else if (RIGHT.has(event.code)) right = false;
+  window.addEventListener('keyup', (ev) => {
+    input.keys.delete(ev.code);
   });
-  // A key released while the tab is hidden never sends keyup: let go of everything on blur.
   window.addEventListener('blur', () => {
-    left = false;
-    right = false;
+    input.keys.clear();
+    input.mouseDown = false;
   });
-  target.addEventListener('pointerdown', () => {
-    actions |= ACTION_CONFIRM;
+  canvas.addEventListener('mousemove', (ev) => {
+    const rect = canvas.getBoundingClientRect();
+    input.mouseX = ((ev.clientX - rect.left) / rect.width) * canvas.width;
+    input.mouseY = ((ev.clientY - rect.top) / rect.height) * canvas.height;
   });
+  canvas.addEventListener('mousedown', (ev) => {
+    if (ev.button === 0) {
+      input.mouseDown = true;
+      input.mouseClicked = true;
+    }
+  });
+  window.addEventListener('mouseup', (ev) => {
+    if (ev.button === 0) input.mouseDown = false;
+  });
+  canvas.addEventListener('contextmenu', (ev) => ev.preventDefault());
+}
 
-  return {
-    /** -1 for left, 1 for right, 0 for neither or both. */
-    direction() {
-      return (right ? 1 : 0) - (left ? 1 : 0);
-    },
-    /** The one-shot presses since the last call, as ACTION_* flags. */
-    takeActions() {
-      const taken = actions;
-      actions = 0;
-      return taken;
-    },
-  };
+export function held(code) {
+  return input.keys.has(code);
+}
+
+export function justPressed(code) {
+  return input.pressed.has(code);
+}
+
+/** Read a press edge and eat it, so one tap cannot fire twice in a frame. */
+export function consumePress(code) {
+  if (input.pressed.has(code)) {
+    input.pressed.delete(code);
+    return true;
+  }
+  return false;
+}
+
+/** Movement axes from the keyboard: x right, y down, each -1..1. */
+export function moveAxes() {
+  let x = 0;
+  let y = 0;
+  if (held('KeyA') || held('ArrowLeft')) x -= 1;
+  if (held('KeyD') || held('ArrowRight')) x += 1;
+  if (held('KeyW') || held('ArrowUp')) y -= 1;
+  if (held('KeyS') || held('ArrowDown')) y += 1;
+  return { x, y };
+}
+
+/** Called once per fixed step, after every system has read the edges. */
+export function endStepInput() {
+  input.pressed.clear();
+  input.mouseClicked = false;
 }
